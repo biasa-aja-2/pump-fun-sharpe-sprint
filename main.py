@@ -236,6 +236,7 @@ def on_batch(state, batch):
         worth = proceeds_for(int(holding.token_amount), quote_res, token_res) - tx_fee
         cost = int(holding.cost_lamports) + trade.fees_paid
         book = books.get(mint)
+        # First matching rule wins; a position with no reason stays open.
         reason = None
         if cost > 0 and worth * BPS <= cost * (BPS - int(STOP_PCT * BPS)):
             reason = "stop-loss"
