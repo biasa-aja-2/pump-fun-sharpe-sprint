@@ -1,63 +1,56 @@
-"""Steady Rider: a pump.fun replay bot tuned for hourly Sharpe (agent-fun/replay/v2).
+"""Steady Rider — a pump.fun paper bot that chases hourly Sharpe, not raw PnL.
 
-This bounty ranks by hourly Sharpe ratio, not raw PnL, and a prize needs a
-net PnL above holding cash. The sweep behind this bot (31 grade-local runs
-on the dev window) showed what actually moves Sharpe on pump.fun data:
+Ranking here is by hourly Sharpe ratio, and a prize additionally needs a
+net PnL above holding cash. Thirty-one grade-local runs on the dev window
+taught this bot what actually moves Sharpe on pump.fun tapes:
 
-  * Fixed take-profits and trailing stops DESTROY the edge: every TP
-    variant (12-40%) and every trailing-stop variant (10-20%) ended the dev
-    window negative, because the profit lives in the few coins that run to
-    curve completion, where the replay closes them at the peak price. Cut
-    a winner early and the steady bleed of the other 85% of trades wins.
-  * What works is a strict entry plus riding winners: only buy a coin that
-    has already proven real demand (many distinct buyers, large net buy
-    flow, strong run-up, deep real reserves, quiet creator), then let it
-    run to completion and cut losers at a 10% stop-loss. Each stricter
-    filter raised both PnL and Sharpe; the final set trades 99 coins on
-    the dev window with a 11% win rate and a 5.2% max drawdown.
-  * Small, fixed stakes (0.08 SOL) and at most five open positions keep
-    no single coin able to sink the run or dominate the hourly equity
-    path, which is what Sharpe measures: mean hourly return over its
-    sample standard deviation.
+* Capping winners kills the edge. Every fixed take-profit tried (12%,
+  20%, 25%, 30%, 40%) and every trailing stop tried (10%, 12%, 15%, 20%)
+  finished the dev window negative. The profit lives in the handful of
+  coins that run all the way to curve completion, where the replay closes
+  them at the peak price. Exit one early and the slow bleed of the other
+  ~85% of trades — each one a small loss — wins the day.
+* Selectivity is the whole game. Each stricter entry filter raised both
+  PnL and Sharpe: more distinct buyers, more net buy flow, a higher
+  run-up, deeper real reserves, a quieter creator. The final filter set
+  buys 99 of the dev window's 1,222 coins and wins 11% of its round
+  trips, with a 5.2% maximum drawdown.
+* Stakes stay small and fixed (0.08 SOL) with at most five positions
+  open, so no single coin can sink the run or dominate one hourly
+  equity mark — and the hourly equity marks are exactly what Sharpe is
+  computed from: mean hourly return over its sample standard deviation.
 
-Entry: the bot never snipes a launch. It watches every coin from its
-CreateEvent and only buys once the coin has proven itself:
+How it trades: never a launch snipe. The bot follows every coin from its
+CreateEvent and buys only after the coin has shown genuine demand — old
+enough that the creation frenzy is over, bought by many distinct wallets
+other than the creator, carrying several SOL of net buy flow, sitting on
+deep real reserves, up a healthy multiple from its creation price but not
+a vertical spike, with a creator who has not sold and has not bought much
+either. Winners are then left alone until the curve completes; losers are
+cut by a 10% stop-loss, a hold-time cap, a staleness rule, or a creator
+exit. One buy per coin, ever.
 
-  * at least MIN_AGE slots old (the create-slot frenzy is over),
-  * at least MIN_BUYERS distinct non-creator buyers,
-  * at least MIN_NET_SOL of net buy flow (buys minus sells),
-  * real SOL reserves of at least MIN_RQ_SOL (so the 1%-of-reserve size cap
-    still allows a meaningful stake),
-  * price up MIN_RUNUP..MAX_RUNUP over its create price (a real run, not a
-    dead coin and not a vertical spike that already happened),
-  * the creator has not sold, and the creator's own buys stay small.
+Dev window score (grade-local, --driver process, the bot executed twice
+and the two action logs matched byte for byte): net PnL +0.515 SOL
+(+5.15%), hourly Sharpe 0.120, sortino 0.438, win rate 11.1%, max
+drawdown 5.2%, 99 coins, 195 fills, every guardrail met; at doubled fees
+the net PnL is still +0.289 SOL. The dev window is a single 24-hour
+sample and the final window is six fresh hours, so treat this as
+evidence, not a promise. A --stress 10 check underlines the fragility:
+the median rebuilt copy lost 0.391 SOL, nine of ten copies lost money,
+and the three best coins made 82% of the dev gains (without them the net
+PnL is -0.941 SOL). The entry below is the best variant found, but a
+fresh window may well score near or below zero; no placing is promised.
 
-Exits: a 10% stop-loss, a time limit, a staleness exit, and a creator-sell
-exit. No take-profit: winners are left to run to completion. One entry
-per coin, small fixed stakes, at most five open positions.
-
-Dev result (grade-local, harness, --driver process, two executions,
-reproduced byte for byte): net PnL +0.515 SOL (+5.15%), hourly Sharpe
-0.120, sortino 0.438, win rate 11.1%, max drawdown 5.2%, 99 coins,
-195 fills, guardrails met; net PnL at 2x fees still +0.289 SOL.
-Buy-and-hold on the same dev window is not a scored baseline for this
-harness, but the equal-weight house baseline and every TP/trail variant
-tested scored below this bot. The dev window is one 24-hour sample and
-the final window is 6 fresh hours, so this is evidence, not a promise.
-Stress check (--stress 10): the dev score is fragile — median of the 10
-rebuilt copies is -0.391 SOL, 9 of 10 copies lost money, and the top 3
-coins made 82% of the dev gains (net PnL without them is -0.941 SOL).
-The entry is the best variant found, but a fresh window may well score
-near or below zero; no ranking is promised.
-
-Protocol notes (the hello / batch / orders / slot flow): the harness sends
-one hello, then one batch per slot with its events, marks, fills and
-account, and the bot answers each batch with at most max_orders_per_batch
-orders. Sells are decided before buys, so a sell's proceeds are free for
-the next batch. Determinism: no clock, no randomness, no environment
-reads. Iteration is only over insertion-ordered dicts; sets are used for
-membership tests only. Pure standard library (the vendored kit SDK shim
-in vendor/).
+Wire protocol in one paragraph (hello, batch, orders, slot): the harness
+opens with a single hello, then sends one batch per slot carrying that
+slot's events, reserve marks, fills and account snapshot, and the bot
+answers every batch with at most max_orders_per_batch orders. Exits are
+chosen before entries, so a sale's proceeds are available to the next
+batch rather than the current one. The run is fully deterministic — no
+clock, no randomness, no environment reads — and every loop walks an
+insertion-ordered dict while sets serve only membership tests. Standard
+library only; the kit's Python SDK shim lives in vendor/.
 """
 
 import os
@@ -69,256 +62,260 @@ import makefun_bot  # noqa: E402  (after the sys.path line: -P leaves the script
 
 LAMPORTS = makefun_bot.LAMPORTS_PER_SOL
 BPS = 10_000
-# Curve fee on a sell (protocol 95 bps + creator 30 bps).
-FEE_BPS = 125
+# What a sell pays in curve fees: protocol 95 bps plus creator 30 bps.
+SELL_FEE_BPS = 125
 
-# --- entry filters (strict: only proven demand gets bought) ---------------
-MIN_AGE = 20            # slots since CreateEvent before a buy is allowed
-MAX_AGE = 40            # ... and after this the coin is decided for good
-MIN_BUYERS = 15         # distinct non-creator buyers seen
-MIN_NET_SOL = 4.0       # net SOL bought minus sold since creation
-MIN_RQ_SOL = 5.0        # real SOL reserves at decision time, at least
-MIN_RUNUP = 1.5         # price now / create price, at least
-MAX_RUNUP = 4.0         # ... and at most
-MAX_DEV_BUY_SOL = 1.5   # creator's own buys must stay below this
-MIN_BUY_SOL = 0.03      # smallest buy worth paying the tx fee for
-STAKE_SOL = 0.08        # SOL aimed at per coin (small: diversify, smooth)
+# --- When a coin earns a buy: strict, all of these at once ----------------
+EARLIEST_SLOT = 20      # slots after CreateEvent before buying is allowed
+LATEST_SLOT = 40        # ... and past this the coin is settled for good
+NEED_BUYERS = 15        # distinct non-creator buyers observed
+NEED_NET_SOL = 4.0      # net SOL bought minus sold since creation
+NEED_REAL_SOL = 5.0     # real SOL reserves when the decision is made
+NEED_RUNUP = 1.5        # price now over creation price, lower bound
+MAX_RUNUP = 4.0         # ... and upper bound
+MAX_MAKER_BUY_SOL = 1.5  # the creator's own buys must stay under this
+SMALLEST_BUY_SOL = 0.03  # a buy smaller than this is not worth its tx fee
+STAKE_SOL = 0.08        # SOL per coin: small on purpose, for diversification
 
-# --- exits (ride winners to completion, cut losers fast) -------------------
-STOP_LOSS = 0.10        # sell when value falls 10% under cost
-MAX_HOLD = 500          # slots; then sell whatever is left
-STALE_SLOTS = 150       # slots with no trade on the coin; then sell
-EXIT_ON_DEV_SELL = True
+# --- When a position is closed --------------------------------------------
+STOP_PCT = 0.10         # sell once value drops 10% below cost
+HOLD_LIMIT = 500        # slots held, then sell whatever remains
+IDLE_LIMIT = 150        # slots without a trade, then sell and free the slot
+EXIT_IF_MAKER_SELLS = True
 
 
-def sell_value_lamports(tokens, vq, vt):
-    """What selling `tokens` against (vq, vt) would pay after curve fees."""
-    if tokens <= 0 or vt <= 0:
+def proceeds_for(amount_tokens, quote_res, token_res):
+    """SOL a sell of `amount_tokens` returns after curve fees, in lamports."""
+    if amount_tokens <= 0 or token_res <= 0:
         return 0
-    q = (tokens * vq) // (vt + tokens)
-    fee = (q * FEE_BPS + BPS - 1) // BPS
-    return q - fee
+    gross = (amount_tokens * quote_res) // (token_res + amount_tokens)
+    fee = (gross * SELL_FEE_BPS + BPS - 1) // BPS
+    return gross - fee
 
 
-class Tape:
-    """Everything the bot remembers about one coin."""
+class CoinBook:
+    """One coin's tape: what the bot has learned about it since creation."""
 
     __slots__ = (
-        "created_slot", "creator", "vq0", "vt0", "buyers", "net_lamports",
-        "dev_buy_lamports", "dev_sold", "last_trade_slot", "decided",
+        "born_slot", "maker", "quote0", "token0", "buyer_set", "net_flow",
+        "maker_bought", "maker_sold", "last_seen_slot", "settled",
     )
 
-    def __init__(self, created_slot, creator, vq0, vt0):
-        self.created_slot = created_slot
-        self.creator = creator
-        self.vq0 = vq0
-        self.vt0 = vt0
-        self.buyers = set()
-        self.net_lamports = 0
-        self.dev_buy_lamports = 0
-        self.dev_sold = False
-        self.last_trade_slot = created_slot
-        self.decided = False
+    def __init__(self, born_slot, maker, quote0, token0):
+        self.born_slot = born_slot
+        self.maker = maker
+        self.quote0 = quote0
+        self.token0 = token0
+        self.buyer_set = set()
+        self.net_flow = 0
+        self.maker_bought = 0
+        self.maker_sold = False
+        self.last_seen_slot = born_slot
+        self.settled = False
 
 
-class Held:
-    """An open position and what it cost."""
+class OpenTrade:
+    """One open position: when it filled and what it has cost so far."""
 
-    __slots__ = ("opened_slot", "tx_paid", "dev_sold_at_open")
+    __slots__ = ("filled_slot", "fees_paid", "maker_sold_at_fill")
 
-    def __init__(self, opened_slot, tx_paid, dev_sold_at_open):
-        self.opened_slot = opened_slot
-        self.tx_paid = tx_paid
-        self.dev_sold_at_open = dev_sold_at_open
+    def __init__(self, filled_slot, fees_paid, maker_sold_at_fill):
+        self.filled_slot = filled_slot
+        self.fees_paid = fees_paid
+        self.maker_sold_at_fill = maker_sold_at_fill
 
 
-tapes = {}
-held = {}
-# Mints with a sell already in flight (wait for it instead of re-selling).
-selling = set()
+books = {}
+open_trades = {}
+# Mints whose sell order is already in flight: wait for its fill.
+sell_in_flight = set()
 
 
 def on_batch(state, batch):
-    now = state.slot
-    tx = state.tx_fee_lamports()
-    cap_orders = state.hello["caps"]["max_orders_per_batch"]
+    slot_now = state.slot
+    tx_fee = state.tx_fee_lamports()
+    order_cap = state.hello["caps"]["max_orders_per_batch"]
 
-    # --- fold this batch's events into the tapes ---------------------------
-    for e in batch["events"]:
-        kind = e["event"]
-        mint = e["mint"]
+    # --- Learn from this batch's events ------------------------------------
+    for event in batch["events"]:
+        kind = event["event"]
+        mint = event["mint"]
         if kind == "CreateEvent":
-            if mint not in tapes:
-                tapes[mint] = Tape(
-                    e["slot"], e["creator"],
-                    int(e["virtual_quote_reserves"]),
-                    int(e["virtual_token_reserves"]),
+            if mint not in books:
+                books[mint] = CoinBook(
+                    event["slot"], event["creator"],
+                    int(event["virtual_quote_reserves"]),
+                    int(event["virtual_token_reserves"]),
                 )
         elif kind == "TradeEvent":
-            t = tapes.get(mint)
-            if t is None:
+            book = books.get(mint)
+            if book is None:
                 continue
-            sol = int(e["sol_amount"])
-            t.last_trade_slot = e["slot"]
-            if e["is_buy"]:
-                t.net_lamports += sol
-                if e["user"] == t.creator:
-                    t.dev_buy_lamports += sol
+            moved = int(event["sol_amount"])
+            book.last_seen_slot = event["slot"]
+            if event["is_buy"]:
+                book.net_flow += moved
+                if event["user"] == book.maker:
+                    book.maker_bought += moved
                 else:
-                    t.buyers.add(e["user"])
+                    book.buyer_set.add(event["user"])
             else:
-                t.net_lamports -= sol
-                if e["user"] == t.creator:
-                    t.dev_sold = True
-        else:  # CompleteEvent: the coin is done, never buy it.
-            t = tapes.get(mint)
-            if t is not None:
-                t.decided = True
+                book.net_flow -= moved
+                if event["user"] == book.maker:
+                    book.maker_sold = True
+        else:  # CompleteEvent: the curve is finished, never buy this coin.
+            book = books.get(mint)
+            if book is not None:
+                book.settled = True
 
-    # --- fold fills: track tx paid, drop harness-closed positions ----------
-    for f in batch["fills"]:
-        mint = f["mint"]
-        if f["client_id"].startswith("_"):
-            held.pop(mint, None)
-            selling.discard(mint)
+    # --- Learn from this batch's fills --------------------------------------
+    for fill in batch["fills"]:
+        mint = fill["mint"]
+        if fill["client_id"].startswith("_"):
+            # A harness close (completion, flatten, write-off): position gone.
+            open_trades.pop(mint, None)
+            sell_in_flight.discard(mint)
             continue
-        if f["status"] == "filled":
-            h = held.get(mint)
-            if h is not None:
-                h.tx_paid += int(f["tx_fee_lamports"])
-            elif f["side"] == "buy":
-                t = tapes.get(mint)
-                held[mint] = Held(
-                    f["slot"], int(f["tx_fee_lamports"]),
-                    t.dev_sold if t is not None else False,
+        if fill["status"] == "filled":
+            trade = open_trades.get(mint)
+            if trade is not None:
+                trade.fees_paid += int(fill["tx_fee_lamports"])
+            elif fill["side"] == "buy":
+                book = books.get(mint)
+                open_trades[mint] = OpenTrade(
+                    fill["slot"], int(fill["tx_fee_lamports"]),
+                    book.maker_sold if book is not None else False,
                 )
-        if f["status"] in ("filled", "rejected", "failed"):
-            selling.discard(mint)
-    # A held mint whose position vanished (and no sell pending) is gone.
-    pending_sell = set()
-    pending_buy = set()
-    for p in state.pending.values():
-        if p.order["side"] == "sell":
-            pending_sell.add(p.order["mint"])
+        if fill["status"] in ("filled", "rejected", "failed"):
+            sell_in_flight.discard(mint)
+    # A tracked trade whose position is gone (and no buy pending) is gone.
+    sell_pending = set()
+    buy_pending = set()
+    for awaiting in state.pending.values():
+        if awaiting.order["side"] == "sell":
+            sell_pending.add(awaiting.order["mint"])
         else:
-            pending_buy.add(p.order["mint"])
-    for mint in list(held):
-        if mint not in state.positions and mint not in pending_buy:
-            held.pop(mint, None)
-            t = tapes.get(mint)
-            if t is not None:
-                t.decided = True
+            buy_pending.add(awaiting.order["mint"])
+    for mint in list(open_trades):
+        if mint not in state.positions and mint not in buy_pending:
+            open_trades.pop(mint, None)
+            book = books.get(mint)
+            if book is not None:
+                book.settled = True
 
-    marks = {}
-    for m in batch["marks"]:
-        marks[m["mint"]] = (
-            int(m["virtual_quote_reserves"]),
-            int(m["virtual_token_reserves"]),
+    latest_marks = {}
+    for mark in batch["marks"]:
+        latest_marks[mark["mint"]] = (
+            int(mark["virtual_quote_reserves"]),
+            int(mark["virtual_token_reserves"]),
         )
 
     orders = []
 
-    # --- exits first (sells before buys: proceeds free the next batch) ------
-    for mint in list(held):
-        if len(orders) >= cap_orders:
+    # --- Exits first: a sale's cash is spendable from the next batch on ----
+    for mint in list(open_trades):
+        if len(orders) >= order_cap:
             break
-        if mint in selling or mint in pending_sell:
+        if mint in sell_in_flight or mint in sell_pending:
             continue
-        pos = state.positions.get(mint)
-        if pos is None:
+        holding = state.positions.get(mint)
+        if holding is None:
             continue
         curve = state.curves.get(mint)
         if curve is None or curve.complete:
             continue
-        mk = marks.get(mint)
-        if mk is not None:
-            vq, vt = mk
+        mark = latest_marks.get(mint)
+        if mark is not None:
+            quote_res, token_res = mark
         else:
-            vq, vt = curve.virtual_quote_reserves, curve.virtual_token_reserves
-        h = held[mint]
-        value = sell_value_lamports(int(pos.token_amount), vq, vt) - tx
-        basis = int(pos.cost_lamports) + h.tx_paid
-        t = tapes.get(mint)
-        exit_now = False
-        if basis > 0 and value * BPS <= basis * (BPS - int(STOP_LOSS * BPS)):
-            exit_now = True  # stop-loss
-        elif now - h.opened_slot >= MAX_HOLD:
-            exit_now = True  # time limit
-        elif t is not None and now - t.last_trade_slot >= STALE_SLOTS:
-            exit_now = True  # dead coin, free the slot
+            quote_res, token_res = (
+                curve.virtual_quote_reserves,
+                curve.virtual_token_reserves,
+            )
+        trade = open_trades[mint]
+        worth = proceeds_for(int(holding.token_amount), quote_res, token_res) - tx_fee
+        cost = int(holding.cost_lamports) + trade.fees_paid
+        book = books.get(mint)
+        reason = None
+        if cost > 0 and worth * BPS <= cost * (BPS - int(STOP_PCT * BPS)):
+            reason = "stop-loss"
+        elif slot_now - trade.filled_slot >= HOLD_LIMIT:
+            reason = "hold limit"
+        elif book is not None and slot_now - book.last_seen_slot >= IDLE_LIMIT:
+            reason = "idle coin"
         elif (
-            EXIT_ON_DEV_SELL
-            and t is not None
-            and t.dev_sold
-            and not h.dev_sold_at_open
+            EXIT_IF_MAKER_SELLS
+            and book is not None
+            and book.maker_sold
+            and not trade.maker_sold_at_fill
         ):
-            exit_now = True  # creator exited while we hold
-        if not exit_now:
+            reason = "maker exited"
+        if reason is None:
             continue
         orders.append({
             "side": "sell", "mint": mint,
-            "token_amount": int(pos.token_amount),
+            "token_amount": int(holding.token_amount),
             "max_slippage_bps": BPS,
         })
-        selling.add(mint)
-        if t is not None:
-            t.decided = True
+        sell_in_flight.add(mint)
+        if book is not None:
+            book.settled = True
 
-    # --- entries ------------------------------------------------------------
-    free = state.free_cash_lamports()
-    for mint, t in tapes.items():
-        if len(orders) >= cap_orders:
+    # --- Entries: only coins that have proven themselves --------------------
+    cash_free = state.free_cash_lamports()
+    for mint, book in books.items():
+        if len(orders) >= order_cap:
             break
-        if t.decided:
+        if book.settled:
             continue
-        age = now - t.created_slot
-        if age > MAX_AGE:
-            t.decided = True
+        age = slot_now - book.born_slot
+        if age > LATEST_SLOT:
+            book.settled = True
             continue
-        if age < MIN_AGE:
+        if age < EARLIEST_SLOT:
             continue
-        if mint in held or mint in pending_buy or mint in selling:
+        if mint in open_trades or mint in buy_pending or mint in sell_in_flight:
             continue
         if state.committed_position_count() >= state.hello["caps"]["max_open_positions"]:
             break
         curve = state.curves.get(mint)
         if curve is None or curve.complete:
-            t.decided = True
+            book.settled = True
             continue
-        if t.dev_sold or t.dev_buy_lamports > int(MAX_DEV_BUY_SOL * LAMPORTS):
-            t.decided = True
+        if book.maker_sold or book.maker_bought > int(MAX_MAKER_BUY_SOL * LAMPORTS):
+            book.settled = True
             continue
-        if len(t.buyers) < MIN_BUYERS:
+        if len(book.buyer_set) < NEED_BUYERS:
             continue
-        if t.net_lamports < int(MIN_NET_SOL * LAMPORTS):
+        if book.net_flow < int(NEED_NET_SOL * LAMPORTS):
             continue
-        rq_sol = int(curve.real_quote_reserves) / LAMPORTS
-        if rq_sol < MIN_RQ_SOL:
+        real_sol = int(curve.real_quote_reserves) / LAMPORTS
+        if real_sol < NEED_REAL_SOL:
             continue
-        if t.vt0 <= 0 or t.vq0 <= 0:
+        if book.token0 <= 0 or book.quote0 <= 0:
             continue
-        runup_num = int(curve.virtual_quote_reserves) * t.vt0
-        runup_den = int(curve.virtual_token_reserves) * t.vq0
-        if runup_den <= 0:
+        # runup = (quote_res/token_res) / (quote0/token0), cross-multiplied.
+        runup_top = int(curve.virtual_quote_reserves) * book.token0
+        runup_bottom = int(curve.virtual_token_reserves) * book.quote0
+        if runup_bottom <= 0:
             continue
-        # runup = vq/vt divided by vq0/vt0, compared without floats.
-        if runup_num * BPS < int(MIN_RUNUP * BPS) * runup_den:
+        if runup_top * BPS < int(NEED_RUNUP * BPS) * runup_bottom:
             continue
-        if runup_num * BPS > int(MAX_RUNUP * BPS) * runup_den:
+        if runup_top * BPS > int(MAX_RUNUP * BPS) * runup_bottom:
             continue
-        cap = state.max_buy_lamports(mint)
-        amount = min(int(STAKE_SOL * LAMPORTS), cap)
-        if amount < int(MIN_BUY_SOL * LAMPORTS):
+        size_cap = state.max_buy_lamports(mint)
+        amount = min(int(STAKE_SOL * LAMPORTS), size_cap)
+        if amount < int(SMALLEST_BUY_SOL * LAMPORTS):
             continue
-        if free < amount + 2 * tx:
+        if cash_free < amount + 2 * tx_fee:
             break
         orders.append({
             "side": "buy", "mint": mint,
             "quote_lamports": amount,
             "max_slippage_bps": BPS,
         })
-        free -= amount + tx
-        t.decided = True
+        cash_free -= amount + tx_fee
+        book.settled = True
     return orders
 
 
