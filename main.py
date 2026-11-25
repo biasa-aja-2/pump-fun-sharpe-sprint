@@ -44,6 +44,11 @@ Buy-and-hold on the same dev window is not a scored baseline for this
 harness, but the equal-weight house baseline and every TP/trail variant
 tested scored below this bot. The dev window is one 24-hour sample and
 the final window is 6 fresh hours, so this is evidence, not a promise.
+Stress check (--stress 10): the dev score is fragile — median of the 10
+rebuilt copies is -0.391 SOL, 9 of 10 copies lost money, and the top 3
+coins made 82% of the dev gains (net PnL without them is -0.941 SOL).
+The entry is the best variant found, but a fresh window may well score
+near or below zero; no ranking is promised.
 
 Protocol notes (the hello / batch / orders / slot flow): the harness sends
 one hello, then one batch per slot with its events, marks, fills and
